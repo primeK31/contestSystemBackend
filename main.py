@@ -2,21 +2,24 @@ import json
 from typing import List
 import uuid
 from datetime import datetime, timedelta
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from models import Question, Contest, Token, User, ConnectionManager, Room
+from models import Question, Contest, Rating, Token, User, ConnectionManager, Room, SuperContest
 from fastapi.middleware.cors import CORSMiddleware
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from utils import get_next_sequence_value
 from dotenv import load_dotenv
 from awsbucket import S3_BUCKET_NAME, s3_client
-from database import collection, db_contests, users, db_admins, db_rooms
+from database import collection, db_contests, users, db_admins, db_rooms, super_contests, db_ratings
 from auth import create_access_token, get_current_user, get_current_active_user, admin_auth, ACCESS_TOKEN_EXPIRE_MINUTES, user_auth
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import bcrypt
 from typing import List, Dict, Optional
+from openai import OpenAI
+import asyncio
 
 load_dotenv()
 
@@ -39,6 +42,8 @@ app.add_middleware(
 
 manager = ConnectionManager()
 
+aiclient = OpenAI()
+
 contests: Dict[str, Contest] = {}
 rooms: Dict[str, Room] = {}
 
@@ -50,19 +55,110 @@ async def websocket_endpoint(websocket: WebSocket, room_name: str, user_name: st
         while True:
             try:
                 data = await websocket.receive_text()
-                message = json.loads(data)  # Ensure we correctly parse JSON
-            except json.JSONDecodeError:
-                await websocket.send_text("Error: Received data is not in JSON format.")
+            except Exception as e:
+                await websocket.send_text(f"Error: {str(e)}")
                 continue
+            
             user = users.find_one({"username": user_name})
             if user:
-                message_with_username = {"type": "message", "data": f"{user['username']}: {message['message']}"}
+                message_with_username = f"{user['username']}: {data}"
                 await manager.user_broadcast(message_with_username)
-            await manager.broadcast_json({"type": "message", "data": f"Room {room_name} {user_name}: {message['message']}"}, room_name)
+            
+            room_message = f"Room {room_name} {user_name}: {data}"
+            await manager.broadcast(room_message, room_name)
+    
     except WebSocketDisconnect:
         manager.disconnect(websocket, room_name, user_name)
         await manager.broadcast_active_users(room_name)
-        await manager.broadcast_json({"type": "notification", "data": f"Room {room_name}: A user left the chat"}, room_name)
+        await manager.broadcast(f"Room {room_name}: A user left the chat", room_name)
+
+
+def convert_object_id(data):
+    if isinstance(data, list):
+        for item in data:
+            if "_id" in item:
+                item["_id"] = str(item["_id"])
+    elif isinstance(data, dict):
+        if "_id" in data:
+            data["_id"] = str(data["_id"])
+    return data
+
+
+@app.get("/get_room_rating/{room_name}")
+async def get_room_rating(room_name: str):
+    ratings_list = list(db_ratings.find({"room_name": room_name}).sort("rating", -1))
+    ratings_list = convert_object_id(ratings_list)
+    await manager.broadcast(json.dumps(ratings_list), room_name)
+    return ratings_list
+
+
+@app.put("/update_rating/")
+async def update_rating(rating: Rating):
+    existing_rating = db_ratings.find_one({"username": rating.username, "room_name": rating.room_name})
+    if not existing_rating:
+        raise HTTPException(status_code=404, detail="Rating not found")
+
+    db_ratings.update_one(
+        {"username": rating.username, "room_name": rating.room_name},
+        {"$set": {"rating": rating.rating}}
+    )
+
+    ratings_list = list(db_ratings.find({"room_name": rating.room_name}).sort("rating", -1))
+    ratings_list = convert_object_id(ratings_list)
+    await manager.broadcast(json.dumps(ratings_list), rating.room_name)
+    return ratings_list
+
+
+@app.post("/rate/")
+async def rate_item(rating: Rating):
+    print(rating)
+    existing_rating = db_ratings.find_one({"username": rating.username, "room_name": rating.room_name})
+    if existing_rating:
+        new_rating_value = existing_rating["rating"] + rating.rating
+        db_ratings.update_one(
+            {"username": rating.username, "room_name": rating.room_name},
+            {"$set": {"rating": new_rating_value}}
+        )
+        updated_rating = Rating(username=rating.username, room_name=rating.room_name, rating=new_rating_value)
+    else:
+        db_ratings.insert_one(rating.dict())
+        updated_rating = rating
+    
+    await get_room_rating(rating.room_name)
+    return {"username": updated_rating.username, "rating": updated_rating.rating}
+
+
+@app.post("/aigen/")
+async def generate_contest(prompt: str = Form(None)):
+    print(prompt)
+    example = '{"name": "lol", "description": "string", "question_ids": ["3+3="], "questions": [{"image_url": null, "question": "3+3=", "options": ["1", "2", "3", "6"], "correct_answer": "6"}], "time_limit": 5}'
+    response = aiclient.chat.completions.create(
+        model="gpt-4o",
+        response_format={ "type": "json_object" },
+        messages=[
+            {
+                "role": "system",
+                "content": f'You are creater of my website api jsons. As examples you can use {example}',
+            },
+            {
+                "role": "user",
+                "content": f"{prompt}"
+            },
+            {
+                "role": "user",
+                "content": f"output in json format without your comments using this example where question_ids is list which contains questions names and give time_limit 5, also give a test name in 'name' column and give a short description of the quiz in 'decription' column"
+            }
+        ]
+    )
+    return {"text": response.choices[0].message.content}
+
+
+@app.post("/quiz/")
+async def create_quiz(quiz: SuperContest):
+    room_dict = jsonable_encoder(quiz)
+    room_dict["_id"] = await get_next_sequence_value("superContestId")
+    result = super_contests.insert_one(room_dict)
+    return room_dict
 
 
 @app.post("/rooms/", response_model=Room)
@@ -70,6 +166,13 @@ async def create_room(room: Room):
     room_dict = room.dict()
     room_dict["_id"] = await get_next_sequence_value("roomId")
     result = db_rooms.insert_one(room_dict)
+    return room_dict
+
+@app.post("/supercontests/", response_model=SuperContest)
+async def create_supercontest(contest: SuperContest):
+    room_dict = contest.dict()
+    room_dict["_id"] = await get_next_sequence_value("superContestId")
+    result = super_contests.insert_one(room_dict)
     return room_dict
 
 @app.get("/rooms/", response_model=List[Room])

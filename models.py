@@ -19,12 +19,26 @@ class Contest(BaseModel):
     time_limit: int
 
 
+class SuperContest(BaseModel):
+    name: str
+    description: str
+    question_ids: List[str]
+    questions: List[Question]
+    time_limit: int
+
+
 class User(BaseModel):
     username: str
     email: Optional[str] = None
     password: str
     full_name: Optional[str] = None
     disabled: Optional[bool] = None
+
+
+class Rating(BaseModel):
+    username: str
+    rating: float
+    room_name: str
 
 
 class Room(BaseModel):
@@ -56,20 +70,15 @@ class ConnectionManager:
             for connection in self.active_connections[room_name]:
                 await connection.send_text(message)
 
-    async def user_broadcast(self, message: Dict[str, str]):
+    async def user_broadcast(self, message: str):
         for room_connections in self.active_connections.values():
             for connection in room_connections:
-                await connection.send_json(message)
+                await connection.send_text(message)
 
     async def broadcast_active_users(self, room_name: str):
-        active_users = self.active_users[room_name]
-        message = {"type": "active_users", "data": active_users}
-        await self.broadcast_json(message, room_name)
-
-    async def broadcast_json(self, message: Dict, room_name: str):
-        if room_name in self.active_connections:
-            for connection in self.active_connections[room_name]:
-                await connection.send_json(message)
+        active_users = ", ".join(self.active_users[room_name])
+        message = f"Active users: {active_users}"
+        await self.broadcast(message, room_name)
 
 
 class Token(BaseModel):
