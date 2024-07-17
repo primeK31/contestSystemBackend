@@ -48,29 +48,15 @@ contests: Dict[str, Contest] = {}
 rooms: Dict[str, Room] = {}
 
 
-@app.websocket("/ws/room/{room_name}/user/{user_name}")
-async def websocket_endpoint(websocket: WebSocket, room_name: str, user_name: str):
-    await manager.connect(websocket, room_name, user_name)
+@app.websocket("/ws/room/{room_name}/user/{username}")
+async def websocket_endpoint(websocket: WebSocket, room_name: str, username: str):
+    await manager.connect(room_name, websocket)
     try:
         while True:
-            try:
-                data = await websocket.receive_text()
-            except Exception as e:
-                await websocket.send_text(f"Error: {str(e)}")
-                continue
-            
-            user = users.find_one({"username": user_name})
-            if user:
-                message_with_username = f"{user['username']}: {data}"
-                await manager.user_broadcast(message_with_username)
-            
-            room_message = f"Room {room_name} {user_name}: {data}"
-            await manager.broadcast(room_message, room_name)
-    
+            data = await websocket.receive_text()
+            await manager.broadcast(f"{username}: {data}", room_name)
     except WebSocketDisconnect:
-        manager.disconnect(websocket, room_name, user_name)
-        await manager.broadcast_active_users(room_name)
-        await manager.broadcast(f"Room {room_name}: A user left the chat", room_name)
+        manager.disconnect(room_name, websocket)
 
 
 def convert_object_id(data):

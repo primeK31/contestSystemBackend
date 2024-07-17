@@ -49,36 +49,26 @@ class Room(BaseModel):
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str, List[WebSocket]] = defaultdict(list)
-        self.active_users: Dict[str, List[str]] = defaultdict(list)
+        self.active_connections: Dict[str, List[WebSocket]] = {}
 
-    async def connect(self, websocket: WebSocket, room_name: str, user_name: str):
+    async def connect(self, room_name: str, websocket: WebSocket):
         await websocket.accept()
+        if room_name not in self.active_connections:
+            self.active_connections[room_name] = []
         self.active_connections[room_name].append(websocket)
-        self.active_users[room_name].append(user_name)
-        await self.broadcast_active_users(room_name)
 
-    def disconnect(self, websocket: WebSocket, room_name: str, user_name: str):
+    def disconnect(self, room_name: str, websocket: WebSocket):
         self.active_connections[room_name].remove(websocket)
-        self.active_users[room_name].remove(user_name)
         if not self.active_connections[room_name]:
             del self.active_connections[room_name]
-            del self.active_users[room_name]
 
     async def broadcast(self, message: str, room_name: str):
         if room_name in self.active_connections:
             for connection in self.active_connections[room_name]:
-                await connection.send_text(message)
-
-    async def user_broadcast(self, message: str):
-        for room_connections in self.active_connections.values():
-            for connection in room_connections:
-                await connection.send_text(message)
-
-    async def broadcast_active_users(self, room_name: str):
-        active_users = ", ".join(self.active_users[room_name])
-        message = f"Active users: {active_users}"
-        await self.broadcast(message, room_name)
+                try:
+                    await connection.send_text(message)
+                except WebSocketDisconnect:
+                    self.disconnect(room_name, connection)
 
 
 class Token(BaseModel):
