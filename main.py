@@ -49,7 +49,7 @@ contests: Dict[str, Contest] = {}
 rooms: Dict[str, Room] = {}
 
 
-@app.websocket("/ws/room/{room_name}/user/{username}")
+@app.websocket("/wss/room/{room_name}/user/{username}")
 async def websocket_endpoint(websocket: WebSocket, room_name: str, username: str):
     await manager.connect(room_name, websocket)
     try:
