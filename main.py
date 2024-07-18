@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from utils import get_next_sequence_value
 from dotenv import load_dotenv
-from awsbucket import S3_BUCKET_NAME, s3_client
+from awsbucket import AWS_REGION, S3_BUCKET_NAME, s3_client
 from database import collection, db_contests, users, db_admins, db_rooms, super_contests, db_ratings
 from auth import create_access_token, get_current_user, get_current_active_user, admin_auth, ACCESS_TOKEN_EXPIRE_MINUTES, user_auth
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -155,6 +155,11 @@ async def create_room(room: Room):
     result = db_rooms.insert_one(room_dict)
     return room_dict
 
+@app.get("/supercontests/", response_model=List[SuperContest])
+async def get_supercontest():
+    contests = list(super_contests.find({}))
+    return contests
+
 @app.post("/supercontests/", response_model=SuperContest)
 async def create_supercontest(contest: SuperContest):
     room_dict = contest.dict()
@@ -255,8 +260,9 @@ async def upload_image(file: UploadFile = File(...)):
     try:
         unique_filename = f"{uuid.uuid4()}_{file.filename}"
         file_contents = await file.read()
-        s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=unique_filename, Body=file_contents)
-        return {"image_url": unique_filename, "status": "Successful"}
+        res = s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=unique_filename, Body=file_contents, ACL="public-read")
+        image_url = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{unique_filename}"
+        return {"image_url": image_url, "status": "Successful"}
     except (NoCredentialsError, PartialCredentialsError):
         raise HTTPException(status_code=500, detail="AWS credentials not configured properly")
     except Exception as e:
