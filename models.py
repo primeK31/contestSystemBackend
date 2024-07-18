@@ -43,7 +43,7 @@ class Rating(BaseModel):
 
 class Room(BaseModel):
     name: str
-    contests: Contest
+    contests: SuperContest
     users_list: Optional[List[User]] = None
 
 
