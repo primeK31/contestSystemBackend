@@ -2,6 +2,7 @@ import json
 from typing import List
 import uuid
 from datetime import datetime, timedelta
+from PyPDF2 import PdfReader
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
@@ -11,7 +12,7 @@ from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from utils import get_next_sequence_value
 from dotenv import load_dotenv
 from awsbucket import AWS_REGION, S3_BUCKET_NAME, s3_client
-from database import collection, db_contests, users, db_admins, db_rooms, super_contests, db_ratings
+from database import collection, db_contests, users, db_admins, db_rooms, super_contests, db_ratings, db_file_urls
 from auth import create_access_token, get_current_user, get_current_active_user, admin_auth, ACCESS_TOKEN_EXPIRE_MINUTES, user_auth
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -20,6 +21,7 @@ import bcrypt
 from typing import List, Dict, Optional
 from openai import OpenAI
 import asyncio
+import fitz
 
 load_dotenv()
 
@@ -113,31 +115,6 @@ async def rate_item(rating: Rating):
     
     await get_room_rating(rating.room_name)
     return {"username": updated_rating.username, "rating": updated_rating.rating}
-
-
-@app.post("/aigen/")
-async def generate_contest(prompt: str = Form(None)):
-    print(prompt)
-    example = '{"name": "lol", "description": "string", "question_ids": ["3+3="], "questions": [{"image_url": null, "question": "3+3=", "options": ["1", "2", "3", "6"], "correct_answer": "6"}], "time_limit": 5}'
-    response = aiclient.chat.completions.create(
-        model="gpt-4o",
-        response_format={ "type": "json_object" },
-        messages=[
-            {
-                "role": "system",
-                "content": f'You are creater of my website api jsons. As examples you can use {example}',
-            },
-            {
-                "role": "user",
-                "content": f"{prompt}"
-            },
-            {
-                "role": "user",
-                "content": f"output in json format without your comments using this example where question_ids is list which contains questions names and give time_limit 5, also give a test name in 'name' column and give a short description of the quiz in 'decription' column"
-            }
-        ]
-    )
-    return {"text": response.choices[0].message.content}
 
 
 @app.post("/quiz/")
@@ -262,11 +239,49 @@ async def upload_image(file: UploadFile = File(...)):
         file_contents = await file.read()
         res = s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=unique_filename, Body=file_contents, ACL="public-read")
         image_url = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{unique_filename}"
+        db_file_urls.insert_one({"file_url": unique_filename})
         return {"image_url": image_url, "status": "Successful"}
     except (NoCredentialsError, PartialCredentialsError):
         raise HTTPException(status_code=500, detail="AWS credentials not configured properly")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+
+@app.post("/aigen/")
+async def generate_contest(file_name: str = Form(None), prompt: str = Form(None)):
+    vector_data = db_file_urls.find_one({"file_url": file_name})
+    if not vector_data:
+        raise HTTPException(status_code=404, detail="Vector not found")
+    
+    response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=file_name)
+
+    file_contents = response['Body'].read()
+
+    pdf_document = fitz.open(stream=file_contents, filetype="pdf")
+
+    pdf_text = ""
+    for page_num in range(len(pdf_document)):
+        page = pdf_document.load_page(page_num)
+        pdf_text += page.get_text()
+    example = '{"name": "lol", "description": "string", "question_ids": ["3+3="], "questions": [{"image_url": null, "question": "3+3=", "options": ["1", "2", "3", "6"], "correct_answer": "6"}], "time_limit": 5}'
+    response = aiclient.chat.completions.create(
+        model="gpt-4o",
+        response_format={ "type": "json_object" },
+        messages=[
+            {
+                "role": "system",
+                "content": f'You are creater of my website api jsons. As examples you can use {example}',
+            },
+            {
+                "role": "user",
+                "content": f"{prompt} based on this content {pdf_text}"
+            },
+            {
+                "role": "user",
+                "content": f"output in json format without your comments using this example where question_ids is list which contains questions names and give time_limit 5, also give a test name in 'name' column and give a short description of the quiz in 'decription' column"
+            }
+        ]
+    )
+    return {"text": response.choices[0].message.content}
 
 @app.post("/questions/", response_model=Question)
 async def create_question(question: Question):
