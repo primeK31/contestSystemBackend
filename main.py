@@ -6,13 +6,13 @@ from PyPDF2 import PdfReader
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from models import Question, Contest, Rating, Token, User, ConnectionManager, Room, SuperContest, Message
+from models import Question, Contest, Rating, Token, User, ConnectionManager, Room, SuperContest, Message, Submission
 from fastapi.middleware.cors import CORSMiddleware
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from utils import get_next_sequence_value
 from dotenv import load_dotenv
 from awsbucket import AWS_REGION, S3_BUCKET_NAME, s3_client
-from database import collection, db_contests, users, db_admins, db_rooms, super_contests, db_ratings, db_file_urls, db_messages
+from database import collection, db_contests, users, db_admins, db_rooms, super_contests, db_ratings, db_file_urls, db_messages, db_submissions
 from auth import create_access_token, get_current_user, get_current_active_user, admin_auth, ACCESS_TOKEN_EXPIRE_MINUTES, user_auth
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -87,6 +87,12 @@ async def get_messages():
     return messages
 
 
+@app.get("/messages/{room_name}", response_model=List[Message])
+async def get_messages(room_name: str):
+    messages = list(db_messages.find({"room_name": room_name}))
+    return messages
+
+
 @app.post("/messages/", response_model=Message)
 async def create_messages(message: Message):
     message_dict = message.dict()
@@ -96,6 +102,44 @@ async def create_messages(message: Message):
     print(json.dumps(content_dict))
     await manager.broadcast(json.dumps(content_dict), message_dict['room_name'])
     return message_dict
+
+
+@app.get("/submissions", response_model=List[Submission])
+async def get_submissions():
+    submissions = list(db_submissions.find({}))
+    return submissions
+
+
+@app.get("/submissions/{room_name}", response_model=List[Submission])
+async def get_submissions(room_name: str):
+    submissions = list(db_submissions.find({"room_name": room_name}))
+    return submissions
+
+
+@app.get("/submissions/{username}/{room_name}", response_model=List[Submission])
+async def get_submissions(username: str, room_name: str):
+    submissions = list(db_submissions.find({"username": username, "room_name": room_name}))
+    return submissions
+
+
+@app.get("/submissions/{room_name}", response_model=List[Submission])
+async def get_submissions(room_name: str):
+    submissions = list(db_submissions.find({"room_name": room_name}))
+    return submissions
+
+
+@app.post("/submissions", response_model=Submission)
+async def create_submission(submission: Submission):
+    submission_dict = submission.dict()
+    submission_dict["_id"] = await get_next_sequence_value("submissionId")
+    result = db_submissions.insert_one(submission_dict)
+    return submission_dict
+
+
+@app.get("/ratings/{room_name}", response_model=List[Rating])
+async def get_ratings(room_name: str):
+    ratings = list(db_ratings.find({"room_name": room_name}))
+    return ratings
 
 
 @app.put("/update_rating/")

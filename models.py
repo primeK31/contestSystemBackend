@@ -36,6 +36,15 @@ class User(BaseModel):
     disabled: Optional[bool] = None
 
 
+class Submission(BaseModel):
+    username: str
+    room_name: str
+    question_name: str
+    selected_option: str
+    is_correct: bool
+    submitted_at: datetime
+
+
 class Rating(BaseModel):
     username: str
     rating: float
