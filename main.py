@@ -6,13 +6,13 @@ from PyPDF2 import PdfReader
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from models import Question, Contest, Rating, Token, User, ConnectionManager, Room, SuperContest
+from models import Question, Contest, Rating, Token, User, ConnectionManager, Room, SuperContest, Message
 from fastapi.middleware.cors import CORSMiddleware
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError
 from utils import get_next_sequence_value
 from dotenv import load_dotenv
 from awsbucket import AWS_REGION, S3_BUCKET_NAME, s3_client
-from database import collection, db_contests, users, db_admins, db_rooms, super_contests, db_ratings, db_file_urls
+from database import collection, db_contests, users, db_admins, db_rooms, super_contests, db_ratings, db_file_urls, db_messages
 from auth import create_access_token, get_current_user, get_current_active_user, admin_auth, ACCESS_TOKEN_EXPIRE_MINUTES, user_auth
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
@@ -57,7 +57,7 @@ async def websocket_endpoint(websocket: WebSocket, room_name: str, username: str
     try:
         while True:
             data = await websocket.receive_text()
-            await manager.broadcast(f"{username}: {data}", room_name)
+            await manager.broadcast(f"{data}", room_name)
     except WebSocketDisconnect:
         manager.disconnect(room_name, websocket)
 
@@ -79,6 +79,23 @@ async def get_room_rating(room_name: str):
     ratings_list = convert_object_id(ratings_list)
     await manager.broadcast(json.dumps(ratings_list), room_name)
     return ratings_list
+
+
+@app.get("/messages/", response_model=List[Message])
+async def get_messages():
+    messages = list(db_messages.find({}))
+    return messages
+
+
+@app.post("/messages/", response_model=Message)
+async def create_messages(message: Message):
+    message_dict = message.dict()
+    message_dict["_id"] = await get_next_sequence_value("messageId")
+    result = db_messages.insert_one(message_dict)
+    content_dict = {"username": message.username, "content": message.content}
+    print(json.dumps(content_dict))
+    await manager.broadcast(json.dumps(content_dict), message_dict['room_name'])
+    return message_dict
 
 
 @app.put("/update_rating/")

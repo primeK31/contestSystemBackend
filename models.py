@@ -1,5 +1,6 @@
 from collections import defaultdict
-from pydantic import BaseModel
+from datetime import datetime
+from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from database import db_rooms
@@ -45,6 +46,13 @@ class Room(BaseModel):
     name: str
     contests: SuperContest
     users_list: Optional[List[User]] = None
+    start_time: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Message(BaseModel):
+    username: str
+    content: str
+    room_name: str
 
 
 class ConnectionManager:
@@ -66,7 +74,7 @@ class ConnectionManager:
         if room_name in self.active_connections:
             for connection in self.active_connections[room_name]:
                 try:
-                    await connection.send_text(message)
+                    await connection.send_text(message)  # send_text
                 except WebSocketDisconnect:
                     self.disconnect(room_name, connection)
 
