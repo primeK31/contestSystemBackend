@@ -11,6 +11,7 @@ class Question(BaseModel):
     question: str
     options: List[str]
     correct_answer: str
+    time_limit: int
 
 
 class Contest(BaseModel):
@@ -25,7 +26,6 @@ class SuperContest(BaseModel):
     description: str
     question_ids: List[str]
     questions: List[Question]
-    time_limit: int
 
 
 class User(BaseModel):

@@ -73,6 +73,11 @@ def convert_object_id(data):
     return data
 
 
+@app.get("/healthcheck")
+async def get_healthcheck():
+    return {"status": "It's all good, man"}
+
+
 @app.get("/get_room_rating/{room_name}")
 async def get_room_rating(room_name: str):
     ratings_list = list(db_ratings.find({"room_name": room_name}).sort("rating", -1))
@@ -307,8 +312,9 @@ async def upload_image(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
+
 @app.post("/aigen/")
-async def generate_contest(file_name: str = Form(None), prompt: str = Form(None)):
+async def generate_contest(file_name: str = Form(None), prompt: str = Form(None)):  # need to rewrite
     vector_data = db_file_urls.find_one({"file_url": file_name})
     if not vector_data:
         raise HTTPException(status_code=404, detail="Vector not found")
