@@ -53,8 +53,7 @@ class Rating(BaseModel):
 
 class Room(BaseModel):
     name: str
-    contests: SuperContest
-    users_list: Optional[List[User]] = None
+    contest_name: str
     start_time: datetime = Field(default_factory=datetime.utcnow)
 
 

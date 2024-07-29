@@ -78,6 +78,12 @@ async def get_healthcheck():
     return {"status": "It's all good, man"}
 
 
+@app.get("/server-time")
+async def get_server_time():
+    current_time = datetime.utcnow()
+    return {"server_time": current_time}
+
+
 @app.get("/get_room_rating/{room_name}")
 async def get_room_rating(room_name: str):
     ratings_list = list(db_ratings.find({"room_name": room_name}).sort("rating", -1))
@@ -139,6 +145,19 @@ async def create_submission(submission: Submission):
     submission_dict["_id"] = await get_next_sequence_value("submissionId")
     result = db_submissions.insert_one(submission_dict)
     return submission_dict
+
+
+@app.get("/statistics/{username}")
+async def user_stat(username: str):
+    total_submissions = db_submissions.count_documents({"username": username})
+    correct_submissions = db_submissions.count_documents({"username": username, "is_correct": True})
+    correct_percentage = (correct_submissions / total_submissions) * 100
+    return {
+        "username": username, 
+        "total_submissions": total_submissions, 
+        "correct_submissions": correct_submissions, 
+        "correct_percentage": correct_percentage
+    }
 
 
 @app.get("/ratings/{room_name}", response_model=List[Rating])
@@ -203,6 +222,14 @@ async def get_supercontest():
     contests = list(super_contests.find({}))
     return contests
 
+
+@app.get("/supercontests/{contest_name}", response_model=SuperContest)
+async def get_supercontest(contest_name: str):
+    contests = super_contests.find_one({"name": contest_name})
+    return contests
+
+
+
 @app.post("/supercontests/", response_model=SuperContest)
 async def create_supercontest(contest: SuperContest):
     room_dict = contest.dict()
@@ -210,10 +237,12 @@ async def create_supercontest(contest: SuperContest):
     result = super_contests.insert_one(room_dict)
     return room_dict
 
+
 @app.get("/rooms/", response_model=List[Room])
 async def get_rooms():
     rooms = list(db_rooms.find({}))
     return rooms
+
 
 @app.get("/rooms/{room_name}")
 async def get_room(room_name: str):
@@ -316,20 +345,19 @@ async def upload_image(file: UploadFile = File(...)):
 @app.post("/aigen/")
 async def generate_contest(file_name: str = Form(None), prompt: str = Form(None)):  # need to rewrite
     vector_data = db_file_urls.find_one({"file_url": file_name})
-    if not vector_data:
-        raise HTTPException(status_code=404, detail="Vector not found")
-    
-    response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=file_name)
-
-    file_contents = response['Body'].read()
-
-    pdf_document = fitz.open(stream=file_contents, filetype="pdf")
-
     pdf_text = ""
-    for page_num in range(len(pdf_document)):
-        page = pdf_document.load_page(page_num)
-        pdf_text += page.get_text()
-    example = '{"name": "lol", "description": "string", "question_ids": ["3+3="], "questions": [{"image_url": null, "question": "3+3=", "options": ["1", "2", "3", "6"], "correct_answer": "6"}], "time_limit": 5}'
+    if vector_data:
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=file_name)
+
+        file_contents = response['Body'].read()
+
+        pdf_document = fitz.open(stream=file_contents, filetype="pdf")
+
+        for page_num in range(len(pdf_document)):
+            page = pdf_document.load_page(page_num)
+            pdf_text += page.get_text()
+    
+    example = '{"name":"string","description":"string","question_ids":["string"],"questions":[{"image_url":"string","question":"string","options":["string"],"correct_answer":"string","time_limit":0}]}'
     response = aiclient.chat.completions.create(
         model="gpt-4o",
         response_format={ "type": "json_object" },
