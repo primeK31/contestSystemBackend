@@ -335,7 +335,7 @@ async def upload_image(file: UploadFile = File(...)):
         res = s3_client.put_object(Bucket=S3_BUCKET_NAME, Key=unique_filename, Body=file_contents, ACL="public-read")
         image_url = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{unique_filename}"
         db_file_urls.insert_one({"file_url": unique_filename})
-        return {"image_url": image_url, "status": "Successful"}
+        return {"image_url": image_url, "file_url": unique_filename, "status": "Successful"}
     except (NoCredentialsError, PartialCredentialsError):
         raise HTTPException(status_code=500, detail="AWS credentials not configured properly")
     except Exception as e:
