@@ -378,6 +378,33 @@ async def generate_contest(file_name: str = Form(None), prompt: str = Form(None)
     )
     return {"text": response.choices[0].message.content}
 
+
+@app.get("/submissions_comment")
+async def submissions_comment(username: str):
+
+    submissions = list(db_submissions.find({"username": username, "is_correct": False}))
+    prompt = ''
+
+    for submission in submissions: 
+        prompt += f"Question: {submission['question_name']},  my answer: {submission['selected_option']};"
+
+    response = aiclient.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": f'You are teacher and your pupil has recently had a quiz. Pupil will give you a his incorrect quiz submissions. Make comments and your recomendations based in his submissions.',
+            },
+            {
+                "role": "user",
+                "content": f"Hi, I'm your student here is quiz's questions and my incorrect answer submissions: {prompt}. Please, help me find errors and recommend me a good resources to improve my knowledge."
+            },
+        ]
+    )
+
+    return {"text": response.choices[0].message.content}
+
+
 @app.post("/questions/", response_model=Question)
 async def create_question(question: Question):
     question_dict = question.dict()
