@@ -379,7 +379,7 @@ async def generate_contest(file_name: str = Form(None), prompt: str = Form(None)
     return {"text": response.choices[0].message.content}
 
 
-@app.get("/submissions_comment")
+@app.get("/submissions_comment/{username}")
 async def submissions_comment(username: str):
 
     submissions = list(db_submissions.find({"username": username, "is_correct": False}))
